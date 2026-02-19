@@ -1,0 +1,16 @@
+name: Keep Supabase Awake
+
+on:
+  schedule:
+    - cron: '0 */8 * * *'   # 8 tiếng 1 lần (đủ rồi)
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase
+        run: |
+          curl -X GET "https://snobsiavqtdjfllknntk.supabase.co/rest/v1/" \
+          -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+          -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
