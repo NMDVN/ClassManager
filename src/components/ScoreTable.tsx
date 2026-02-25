@@ -45,14 +45,13 @@ const ScoreTable: React.FC<Props> = ({
   const [tab, setTab] = useState<'score' | 'bonus' | 'penalty'>('score');
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'name' | 'point'>('point'); // Mặc định sắp xếp theo điểm
   
-  // State lưu danh mục tên môn và buổi
   const [subjects, setSubjects] = useState<Record<string, string>>({});
   const [sessions, setSessions] = useState<Record<string, string>>({});
 
   const isAdmin = useMemo(() => role === 'admin' || role === 'superadmin', [role]);
 
-  // Fetch danh mục để lấy tên
   useEffect(() => {
     const fetchMasters = async () => {
       const [subRes, sesRes] = await Promise.all([
@@ -93,6 +92,11 @@ const ScoreTable: React.FC<Props> = ({
     return weeks.map(w => ({ value: w, label: `Tuần ${w}` }));
   }, [scores, offences]);
 
+  const sortOptions = [
+    { value: 'point', label: 'Sắp xếp: Điểm cao' },
+    { value: 'name', label: 'Sắp xếp: Tên A-Z' },
+  ];
+
   const deltaPointMap = useMemo(() => {
     const map = new Map<string, number>();
     offences.forEach(o => {
@@ -105,15 +109,27 @@ const ScoreTable: React.FC<Props> = ({
 
   const processedScores = useMemo(() => {
     let result = selectedWeek ? scores.filter(s => s.week === selectedWeek) : [...scores];
+    
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(s => s.student?.name.toLowerCase().includes(q));
     }
-    return result.map(s => ({
+
+    // Gán thêm biến động điểm
+    const mapped = result.map(s => ({
       ...s,
       delta_point: deltaPointMap.get(`${s.student_id}-${s.week}`) || 0,
-    })).sort((a, b) => (a.student_id > b.student_id ? 1 : -1));
-  }, [scores, selectedWeek, deltaPointMap, searchQuery]);
+    }));
+
+    // Thực hiện sắp xếp
+    if (sortBy === 'point') {
+      mapped.sort((a, b) => b.final_point - a.final_point);
+    } else {
+      mapped.sort((a, b) => (a.student?.name || "").localeCompare(b.student?.name || ""));
+    }
+
+    return mapped;
+  }, [scores, selectedWeek, deltaPointMap, searchQuery, sortBy]);
 
   const filteredDetails = useMemo(() => {
     let result = selectedWeek ? offences.filter(o => o.week === selectedWeek) : [...offences];
@@ -145,7 +161,7 @@ const ScoreTable: React.FC<Props> = ({
       </header>
 
       <div style={styles.filterBar}>
-        <div style={{ width: '150px' }}>
+        <div style={{ width: '130px' }}>
           <Select
             options={weekOptions}
             value={weekOptions.find(w => w.value === selectedWeek) || null}
@@ -154,6 +170,18 @@ const ScoreTable: React.FC<Props> = ({
             placeholder="📅 Tuần"
           />
         </div>
+        
+        {tab === 'score' && (
+          <div style={{ width: '180px' }}>
+            <Select
+              options={sortOptions}
+              value={sortOptions.find(o => o.value === sortBy)}
+              onChange={opt => setSortBy(opt?.value as any || 'point')}
+              isSearchable={false}
+            />
+          </div>
+        )}
+
         <input
           type="text"
           placeholder="🔍 Tìm tên học sinh..."
@@ -173,6 +201,7 @@ const ScoreTable: React.FC<Props> = ({
                 <tr style={styles.theadRow}>
                   {tab === 'score' ? (
                     <>
+                      <th style={{ ...styles.th, width: '50px' }}>STT</th>
                       <th style={styles.th}>Học sinh</th>
                       <th style={styles.th}>Tuần</th>
                       <th style={styles.th}>Biến động (Hiệu số)</th>
@@ -195,14 +224,15 @@ const ScoreTable: React.FC<Props> = ({
               </thead>
               <tbody>
                 {tab === 'score' ? (
-                  processedScores.map(s => {
+                  processedScores.map((s, index) => {
                     const delta = formatDelta(s.delta_point);
                     return (
                       <tr key={`${s.student_id}-${s.week}`} style={styles.tr}>
+                        <td style={{ ...styles.td, color: '#94a3b8' }}>{index + 1}</td>
                         <td style={styles.td}><strong>{s.student?.name}</strong></td>
                         <td style={styles.td}>Tuần {s.week}</td>
                         <td style={{ ...styles.td, color: delta.color, fontWeight: 'bold' }}>{delta.text}</td>
-                        <td style={{ ...styles.td, fontWeight: 'bold', fontSize: '1rem' }}>{s.final_point}</td>
+                        <td style={{ ...styles.td, fontWeight: 'bold', fontSize: '1rem', color: '#1e293b' }}>{s.final_point}</td>
                       </tr>
                     );
                   })
@@ -221,10 +251,8 @@ const ScoreTable: React.FC<Props> = ({
                       </td>
                       <td style={{ ...styles.td, color: '#4f46e5', fontWeight: '600' }}>{getDayOfWeek(o.day)}</td>
                       <td style={styles.td}>{o.day}</td>
-                      {/* Hiển thị tên Môn thay vì ID */}
                       <td style={styles.td}>{o.sub_id ? (subjects[o.sub_id] || o.sub_id) : '—'}</td>
                       <td style={styles.td}>{o.period_id || '—'}</td>
-                      {/* Hiển thị tên Buổi thay vì ID */}
                       <td style={styles.td}>{o.session_id ? (sessions[o.session_id] || o.session_id) : '—'}</td>
                     </tr>
                   ))
@@ -245,8 +273,8 @@ const styles: Record<string, React.CSSProperties> = {
   tabGroup: { display: 'flex', gap: '5px', background: '#f1f5f9', padding: '5px', borderRadius: '10px' },
   tabActive: { flex: 1, padding: '10px', border: 'none', background: '#fff', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
   tabInactive: { flex: 1, padding: '10px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' },
-  filterBar: { display: 'flex', gap: '10px', marginBottom: '15px' },
-  searchInput: { flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none' },
+  filterBar: { display: 'flex', gap: '10px', marginBottom: '15px', alignItems: 'center' },
+  searchInput: { flex: 1, padding: '10px 12px', borderRadius: '6px', border: '1px solid #ccc', outline: 'none', height: '38px', boxSizing: 'border-box' },
   card: { background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' },
   tableWrapper: { overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: '14px' },
