@@ -94,7 +94,7 @@ const ScoreTable: React.FC<Props> = ({
 
   const sortOptions = [
     { value: 'point', label: 'Sắp xếp: Điểm số' },
-    { value: 'id', label: 'Sắp xếp: Mã HS' },
+    { value: 'id', label: 'Sắp xếp: Tên' },
   ];
 
   const deltaPointMap = useMemo(() => {
