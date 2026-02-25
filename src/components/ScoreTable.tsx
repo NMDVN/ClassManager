@@ -45,7 +45,7 @@ const ScoreTable: React.FC<Props> = ({
   const [tab, setTab] = useState<'score' | 'bonus' | 'penalty'>('score');
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'name' | 'point'>('point'); // Mặc định sắp xếp theo điểm
+  const [sortBy, setSortBy] = useState<'id' | 'point'>('point');
   
   const [subjects, setSubjects] = useState<Record<string, string>>({});
   const [sessions, setSessions] = useState<Record<string, string>>({});
@@ -94,7 +94,7 @@ const ScoreTable: React.FC<Props> = ({
 
   const sortOptions = [
     { value: 'point', label: 'Sắp xếp: Điểm cao' },
-    { value: 'name', label: 'Sắp xếp: Tên A-Z' },
+    { value: 'id', label: 'Sắp xếp: Theo Tên (ID)' },
   ];
 
   const deltaPointMap = useMemo(() => {
@@ -115,20 +115,29 @@ const ScoreTable: React.FC<Props> = ({
       result = result.filter(s => s.student?.name.toLowerCase().includes(q));
     }
 
-    // Gán thêm biến động điểm
-    const mapped = result.map(s => ({
+    // Gán delta_point
+    let mapped = result.map(s => ({
       ...s,
       delta_point: deltaPointMap.get(`${s.student_id}-${s.week}`) || 0,
     }));
 
-    // Thực hiện sắp xếp
+    // Sắp xếp
     if (sortBy === 'point') {
       mapped.sort((a, b) => b.final_point - a.final_point);
     } else {
-      mapped.sort((a, b) => (a.student?.name || "").localeCompare(b.student?.name || ""));
+      mapped.sort((a, b) => a.student_id - b.student_id);
     }
 
-    return mapped;
+    // Tính toán Rank (Dense Ranking)
+    let currentRank = 0;
+    let lastPoint = -1;
+    return mapped.map((item) => {
+      if (item.final_point !== lastPoint) {
+        currentRank++;
+        lastPoint = item.final_point;
+      }
+      return { ...item, rank: currentRank };
+    });
   }, [scores, selectedWeek, deltaPointMap, searchQuery, sortBy]);
 
   const filteredDetails = useMemo(() => {
@@ -172,7 +181,7 @@ const ScoreTable: React.FC<Props> = ({
         </div>
         
         {tab === 'score' && (
-          <div style={{ width: '180px' }}>
+          <div style={{ width: '200px' }}>
             <Select
               options={sortOptions}
               value={sortOptions.find(o => o.value === sortBy)}
@@ -201,10 +210,12 @@ const ScoreTable: React.FC<Props> = ({
                 <tr style={styles.theadRow}>
                   {tab === 'score' ? (
                     <>
-                      <th style={{ ...styles.th, width: '50px' }}>STT</th>
+                      <th style={{ ...styles.th, width: '60px', textAlign: 'center' }}>
+                        {sortBy === 'point' ? 'Hạng' : 'STT'}
+                      </th>
                       <th style={styles.th}>Học sinh</th>
                       <th style={styles.th}>Tuần</th>
-                      <th style={styles.th}>Biến động (Hiệu số)</th>
+                      <th style={styles.th}>Biến động</th>
                       <th style={styles.th}>Điểm hiện tại</th>
                     </>
                   ) : (
@@ -228,7 +239,9 @@ const ScoreTable: React.FC<Props> = ({
                     const delta = formatDelta(s.delta_point);
                     return (
                       <tr key={`${s.student_id}-${s.week}`} style={styles.tr}>
-                        <td style={{ ...styles.td, color: '#94a3b8' }}>{index + 1}</td>
+                        <td style={{ ...styles.td, textAlign: 'center', fontWeight: 'bold', color: sortBy === 'point' ? '#4f46e5' : '#94a3b8' }}>
+                          {sortBy === 'point' ? s.rank : index + 1}
+                        </td>
                         <td style={styles.td}><strong>{s.student?.name}</strong></td>
                         <td style={styles.td}>Tuần {s.week}</td>
                         <td style={{ ...styles.td, color: delta.color, fontWeight: 'bold' }}>{delta.text}</td>
@@ -273,8 +286,8 @@ const styles: Record<string, React.CSSProperties> = {
   tabGroup: { display: 'flex', gap: '5px', background: '#f1f5f9', padding: '5px', borderRadius: '10px' },
   tabActive: { flex: 1, padding: '10px', border: 'none', background: '#fff', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
   tabInactive: { flex: 1, padding: '10px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' },
-  filterBar: { display: 'flex', gap: '10px', marginBottom: '15px', alignItems: 'center' },
-  searchInput: { flex: 1, padding: '10px 12px', borderRadius: '6px', border: '1px solid #ccc', outline: 'none', height: '38px', boxSizing: 'border-box' },
+  filterBar: { display: 'flex', gap: '10px', marginBottom: '15px', alignItems: 'center', flexWrap: 'wrap' },
+  searchInput: { flex: 1, padding: '10px 12px', borderRadius: '6px', border: '1px solid #ccc', outline: 'none', minWidth: '200px' },
   card: { background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' },
   tableWrapper: { overflowX: 'auto' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: '14px' },
