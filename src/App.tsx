@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -12,10 +12,11 @@ import { supabase } from "./lib/supabase";
 
 import LoginForm from "./components/LoginForm";
 import ScoreTable from "./components/ScoreTable";
-import OffenceForm from "./components/OffenceForm";
+import RecordInputPage from "./components/RecordInputPage";
 import MonthlyRankings from "./components/MonthlyRankings";
 import AdminTools from "./components/AdminTools";
 import AdminOffenceManager from "./components/AdminOffenceManager";
+import ScheduleManager from "./components/ScheduleManager";
 
 import {
   LayoutDashboard,
@@ -25,10 +26,35 @@ import {
   Menu,
   X,
   LogIn,
-  BarChart3
+  BarChart3,
+  CalendarDays,
+  FileSpreadsheet
 } from "lucide-react";
 
 import type { Session } from "@supabase/supabase-js";
+
+// ================== TYPES ==================
+interface ScoreItem {
+  student_id: number;
+  week: number;
+  final_point: number;
+  student?: { name: string };
+}
+
+interface OffenceLogItem {
+  id: number;
+  student_id: number | null;
+  week: number | null;
+  day: string;
+  sub_id?: string | null;
+  period_id?: string | null;
+  session_id?: string | null;
+  student?: { name: string };
+  offence?: {
+    name: string;
+    deducted_point: number;
+  };
+}
 
 // ================== PAGE ANIMATION ==================
 const pageVariants = {
@@ -41,10 +67,28 @@ function App() {
   // ================== STATE ==================
   const [session, setSession] = useState<Session | null>(null);
   const [role, setRole] = useState<string | null>(null);
-  const [scores, setScores] = useState<any[]>([]);
-  const [offences, setOffences] = useState<any[]>([]);
+  const [scores, setScores] = useState<ScoreItem[]>([]);
+  const [offences, setOffences] = useState<OffenceLogItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isSidebarOpen, setSidebarOpen] = useState(true);
+  const [isMobile, setIsMobile] = useState<boolean>(() => 
+    typeof window !== "undefined" ? window.innerWidth < 768 : false
+  );
+  const [isSidebarOpen, setSidebarOpen] = useState<boolean>(() => 
+    typeof window !== "undefined" ? window.innerWidth >= 768 : true
+  );
+
+  // ================== RESIZE LISTENER ==================
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) {
+        setSidebarOpen(false);
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // ================== FETCH DATA ==================
   const fetchAllData = useCallback(async () => {
@@ -81,61 +125,127 @@ function App() {
     setRole(data?.role ?? null);
   }, []);
 
-  // ================== AUTH ==================
+  // ================== AUTH & INITIAL DATA ==================
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let ignore = false;
+
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (ignore) return;
       setSession(session);
-      if (session) fetchRole(session.user.id);
-    });
+      if (session) {
+        const { data } = await supabase
+          .from("users")
+          .select("role")
+          .eq("id", session.user.id)
+          .single();
+        if (!ignore) setRole(data?.role ?? null);
+      }
+    }
+    void init();
 
     const {
       data: { subscription }
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) fetchRole(session.user.id);
-      else setRole(null);
+      if (session) {
+        fetchRole(session.user.id);
+      } else {
+        setRole(null);
+      }
     });
 
-    fetchAllData();
-    return () => subscription.unsubscribe();
-  }, [fetchAllData, fetchRole]);
+    return () => {
+      ignore = true;
+      subscription.unsubscribe();
+    };
+  }, [fetchRole]);
+
+  useEffect(() => {
+    let ignore = false;
+    async function load() {
+      setLoading(true);
+      try {
+        const [scoreRes, offenceRes] = await Promise.all([
+          supabase
+            .from("weekly_score")
+            .select(`*, student(name)`)
+            .order("final_point", { ascending: false }),
+
+          supabase
+            .from("offence_log")
+            .select(`*, student(name), offence:offence_catalog(name, deducted_point)`)
+            .order("day", { ascending: false })
+        ]);
+
+        if (!ignore) {
+          setScores(scoreRes.data || []);
+          setOffences(offenceRes.data || []);
+        }
+      } catch (e) {
+        console.error("Fetch Error:", e);
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    }
+    void load();
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
-    if (error) alert("Lỗi đăng xuất: " + error.message);
+    if (error) console.error("Lỗi đăng xuất:", error.message);
   };
 
   // ================== ROLE LOGIC ==================
-  const isAdmin = useMemo(
-    () => ["admin", "superadmin"].includes(role || ""),
-    [role]
-  );
-
   const isSuperAdmin = useMemo(
     () => role === "superadmin",
     [role]
   );
 
+  const closeSidebarOnMobile = () => {
+    if (isMobile) setSidebarOpen(false);
+  };
+
   // ================== RENDER ==================
   return (
     <Router>
       <div style={styles.appLayout}>
+        {/* ================= BACKDROP FOR MOBILE ================= */}
+        {isMobile && isSidebarOpen && (
+          <div
+            onClick={() => setSidebarOpen(false)}
+            style={styles.mobileBackdrop}
+          />
+        )}
+
         {/* ================= SIDEBAR ================= */}
         <motion.nav
           initial={false}
-          animate={{ width: isSidebarOpen ? 260 : 80 }}
-          style={styles.sidebar}
+          animate={{
+            width: isMobile ? 260 : isSidebarOpen ? 260 : 80,
+            x: isMobile ? (isSidebarOpen ? 0 : -280) : 0
+          }}
+          transition={{ type: "spring", stiffness: 300, damping: 30 }}
+          style={{
+            ...styles.sidebar,
+            ...(isMobile ? styles.sidebarMobile : {})
+          }}
         >
           <div style={styles.logoSection}>
             <ShieldCheck size={32} color="#2563eb" strokeWidth={2.5} />
-            {isSidebarOpen && (
-              <motion.span
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                style={styles.logoText}
+            {(isSidebarOpen || isMobile) && (
+              <span style={styles.logoText}>QUẢN LÝ</span>
+            )}
+            {isMobile && (
+              <button
+                onClick={() => setSidebarOpen(false)}
+                style={styles.mobileCloseBtn}
               >
-                QUẢN LÝ
-              </motion.span>
+                <X size={20} />
+              </button>
             )}
           </div>
 
@@ -144,23 +254,45 @@ function App() {
               to="/"
               icon={<LayoutDashboard size={20} />}
               label="Bảng điều khiển"
-              isOpen={isSidebarOpen}
+              isOpen={isSidebarOpen || isMobile}
+              onClick={closeSidebarOnMobile}
             />
+
+            {session && (
+              <NavLink
+                to="/record-input"
+                icon={<FileSpreadsheet size={20} />}
+                label="Nhập liệu ghi chép"
+                isOpen={isSidebarOpen || isMobile}
+                onClick={closeSidebarOnMobile}
+              />
+            )}
 
             <NavLink
               to="/monthly"
               icon={<BarChart3 size={20} />}
               label="Xếp hạng tháng"
-              isOpen={isSidebarOpen}
+              isOpen={isSidebarOpen || isMobile}
+              onClick={closeSidebarOnMobile}
             />
 
             {isSuperAdmin && (
-              <NavLink
-                to="/admin/offences"
-                icon={<ShieldCheck size={20} />}
-                label="Quản lý lỗi"
-                isOpen={isSidebarOpen}
+              <>
+                <NavLink
+                  to="/admin/offences"
+                  icon={<ShieldCheck size={20} />}
+                  label="Quản lý lỗi"
+                  isOpen={isSidebarOpen || isMobile}
+                  onClick={closeSidebarOnMobile}
                 />
+                <NavLink
+                  to="/admin/timetable"
+                  icon={<CalendarDays size={20} />}
+                  label="Thời khóa biểu"
+                  isOpen={isSidebarOpen || isMobile}
+                  onClick={closeSidebarOnMobile}
+                />
+              </>
             )}
 
             {!session ? (
@@ -168,7 +300,8 @@ function App() {
                 to="/login"
                 icon={<LogIn size={20} />}
                 label="Đăng nhập"
-                isOpen={isSidebarOpen}
+                isOpen={isSidebarOpen || isMobile}
+                onClick={closeSidebarOnMobile}
               />
             ) : (
               <div
@@ -178,56 +311,68 @@ function App() {
                   paddingTop: "10px"
                 }}
               >
-                <button onClick={handleLogout} style={styles.logoutBtn}>
+                <button
+                  onClick={() => {
+                    handleLogout();
+                    closeSidebarOnMobile();
+                  }}
+                  style={styles.logoutBtn}
+                >
                   <LogOut size={20} />
-                  {isSidebarOpen && <span>Đăng xuất</span>}
+                  {(isSidebarOpen || isMobile) && <span>Đăng xuất</span>}
                 </button>
               </div>
             )}
           </div>
 
-          <button
-            onClick={() => setSidebarOpen(!isSidebarOpen)}
-            style={styles.toggleBtn}
-          >
-            {isSidebarOpen ? <X size={18} /> : <Menu size={18} />}
-          </button>
+          {!isMobile && (
+            <button
+              onClick={() => setSidebarOpen(!isSidebarOpen)}
+              style={styles.toggleBtn}
+            >
+              {isSidebarOpen ? <X size={18} /> : <Menu size={18} />}
+            </button>
+          )}
         </motion.nav>
 
         {/* ================= MAIN ================= */}
         <main
           style={{
             ...styles.mainContent,
-            marginLeft: isSidebarOpen ? 260 : 80
+            marginLeft: isMobile ? 0 : isSidebarOpen ? 260 : 80
           }}
         >
-          <header style={styles.topBar}>
-            <div>
-              <h2 style={styles.headerTitle}>Hệ Thống Thi Đua</h2>
-              <p style={styles.headerSub}>
-                {session
-                  ? `Chào, ${session.user.email}`
-                  : "Chế độ xem công khai"}
-              </p>
+          <header style={{ ...styles.topBar, padding: isMobile ? "12px 16px" : "16px 32px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              {isMobile && (
+                <button
+                  onClick={() => setSidebarOpen(true)}
+                  style={styles.hamburgerBtn}
+                  aria-label="Open menu"
+                >
+                  <Menu size={22} color="#1e293b" />
+                </button>
+              )}
+              <div>
+                <h2 style={{ ...styles.headerTitle, fontSize: isMobile ? "1.05rem" : "1.2rem" }}>
+                  Hệ Thống Thi Đua
+                </h2>
+                <p style={styles.headerSub}>
+                  {session
+                    ? `Chào, ${session.user.email}`
+                    : "Chế độ xem công khai"}
+                </p>
+              </div>
             </div>
 
             <div style={styles.topBarRight}>
               {role && (
                 <div style={styles.roleBadge}>{role.toUpperCase()}</div>
               )}
-              {session && (
-                <button
-                  onClick={handleLogout}
-                  style={styles.iconLogout}
-                  title="Đăng xuất"
-                >
-                  <LogOut size={18} />
-                </button>
-              )}
             </div>
           </header>
 
-          <div style={styles.pageWrapper}>
+          <div style={{ ...styles.pageWrapper, padding: isMobile ? "12px 12px 24px" : "24px 32px" }}>
             <AnimatePresence mode="wait">
               <Routes>
                 {/* ================= DASHBOARD ================= */}
@@ -240,16 +385,12 @@ function App() {
                       initial="initial"
                       animate="animate"
                       exit="exit"
-                      style={styles.dashboardGrid(isAdmin)}
+                      style={getDashboardGridStyle(Boolean(session && isSuperAdmin), isMobile)}
                     >
                       {/* ===== LEFT COLUMN ===== */}
-                      {session && isAdmin && (
-                        <div style={styles.formContainer}>
-                          {isSuperAdmin && (
-                            <AdminTools onUpdate={fetchAllData} />
-                          )}
-
-                          <OffenceForm onUpdate={fetchAllData} />
+                      {session && isSuperAdmin && (
+                        <div style={{ ...styles.formContainer, position: isMobile ? "static" : "sticky" }}>
+                          <AdminTools onUpdate={fetchAllData} />
                         </div>
                       )}
 
@@ -265,6 +406,26 @@ function App() {
                         />
                       </div>
                     </motion.div>
+                  }
+                />
+
+                {/* ================= RECORD INPUT ================= */}
+                <Route
+                  path="/record-input"
+                  element={
+                    session ? (
+                      <motion.div
+                        key="record-input"
+                        variants={pageVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                      >
+                        <RecordInputPage onUpdate={fetchAllData} />
+                      </motion.div>
+                    ) : (
+                      <Navigate to="/login" />
+                    )
                   }
                 />
 
@@ -286,7 +447,7 @@ function App() {
 
                 {/* ================= ADMIN OFFENCES ================= */}
                 <Route
-                path="/admin/offences"
+                  path="/admin/offences"
                   element={
                     isSuperAdmin ? (
                       <motion.div
@@ -297,6 +458,26 @@ function App() {
                         exit="exit"
                       >
                         <AdminOffenceManager />
+                      </motion.div>
+                    ) : (
+                      <Navigate to="/" />
+                    )
+                  }
+                />
+
+                {/* ================= TIMETABLE (SUPER ADMIN ONLY) ================= */}
+                <Route
+                  path="/admin/timetable"
+                  element={
+                    isSuperAdmin ? (
+                      <motion.div
+                        key="admin-timetable"
+                        variants={pageVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                      >
+                        <ScheduleManager />
                       </motion.div>
                     ) : (
                       <Navigate to="/" />
@@ -334,13 +515,22 @@ function App() {
 }
 
 // ================== NAV LINK ==================
-const NavLink = ({ to, icon, label, isOpen }: any) => {
+interface NavLinkProps {
+  to: string;
+  icon: React.ReactNode;
+  label: string;
+  isOpen: boolean;
+  onClick?: () => void;
+}
+
+const NavLink = ({ to, icon, label, isOpen, onClick }: NavLinkProps) => {
   const location = useLocation();
   const isActive = location.pathname === to;
 
   return (
     <Link
       to={to}
+      onClick={onClick}
       style={{ ...styles.navItem, ...(isActive ? styles.navActive : {}) }}
     >
       {icon}
@@ -357,12 +547,26 @@ const NavLink = ({ to, icon, label, isOpen }: any) => {
 };
 
 // ================== STYLES ==================
-const styles: any = {
+const getDashboardGridStyle = (isAdmin: boolean, isMobile: boolean): React.CSSProperties => ({
+  display: "grid",
+  gridTemplateColumns: (!isMobile && isAdmin) ? "380px 1fr" : "1fr",
+  gap: isMobile ? "16px" : "24px"
+});
+
+const styles: Record<string, React.CSSProperties> = {
   appLayout: {
     display: "flex",
     minHeight: "100vh",
     backgroundColor: "#f8fafc",
-    fontFamily: "'Roboto', sans-serif"
+    fontFamily: "'Roboto', sans-serif",
+    position: "relative"
+  },
+  mobileBackdrop: {
+    position: "fixed",
+    inset: 0,
+    backgroundColor: "rgba(15, 23, 42, 0.4)",
+    zIndex: 99,
+    backdropFilter: "blur(2px)"
   },
   sidebar: {
     backgroundColor: "#fff",
@@ -375,6 +579,9 @@ const styles: any = {
     zIndex: 100,
     overflow: "hidden"
   },
+  sidebarMobile: {
+    boxShadow: "4px 0 24px rgba(0,0,0,0.12)"
+  },
   logoSection: {
     display: "flex",
     alignItems: "center",
@@ -386,6 +593,27 @@ const styles: any = {
     fontSize: "1.4rem",
     fontWeight: "800",
     color: "#1e293b"
+  },
+  mobileCloseBtn: {
+    marginLeft: "auto",
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    color: "#64748b",
+    padding: "4px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  hamburgerBtn: {
+    background: "#f1f5f9",
+    border: "none",
+    padding: "8px",
+    borderRadius: "8px",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
   },
   navLinks: {
     display: "flex",
@@ -409,10 +637,10 @@ const styles: any = {
   },
   mainContent: {
     flex: 1,
-    transition: "margin-left 0.3s"
+    transition: "margin-left 0.3s",
+    minWidth: 0
   },
   topBar: {
-    padding: "16px 40px",
     backgroundColor: "#fff",
     borderBottom: "1px solid #e2e8f0",
     display: "flex",
@@ -425,38 +653,44 @@ const styles: any = {
   topBarRight: {
     display: "flex",
     alignItems: "center",
-    gap: "15px"
+    gap: "10px"
   },
   headerTitle: {
     margin: 0,
-    fontSize: "1.2rem",
     fontWeight: "700"
   },
   headerSub: {
     margin: 0,
     fontSize: "0.8rem",
-    color: "#94a3b8"
+    color: "#94a3b8",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    maxWidth: "180px"
   },
   roleBadge: {
-    padding: "5px 14px",
+    padding: "4px 10px",
     borderRadius: "20px",
     background: "#f1f5f9",
-    fontSize: "0.7rem",
-    fontWeight: "800"
+    fontSize: "0.68rem",
+    fontWeight: "800",
+    color: "#2563eb"
   },
-  pageWrapper: { padding: "24px 40px" },
-  dashboardGrid: (isAdmin: boolean) => ({
-    display: "grid",
-    gridTemplateColumns: isAdmin ? "360px 1fr" : "1fr",
-    gap: "24px"
-  }),
-  formContainer: { position: "sticky", top: "100px" },
+  pageWrapper: { width: "100%", maxWidth: "1360px", margin: "0 auto", boxSizing: "border-box" },
+  formContainer: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "16px",
+    position: "sticky",
+    top: "90px"
+  },
   tableContainer: {
     minWidth: 0,
     backgroundColor: "#fff",
-    borderRadius: "16px"
+    borderRadius: "16px",
+    overflow: "hidden"
   },
-  loginCenter: { maxWidth: "400px", margin: "100px auto" },
+  loginCenter: { maxWidth: "400px", margin: "40px auto", width: "100%", padding: "0 12px" },
   toggleBtn: {
     marginTop: "20px",
     padding: "10px",
@@ -481,7 +715,12 @@ const styles: any = {
   iconLogout: {
     background: "none",
     border: "none",
-    cursor: "pointer"
+    cursor: "pointer",
+    padding: "6px",
+    borderRadius: "8px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
   }
 };
 

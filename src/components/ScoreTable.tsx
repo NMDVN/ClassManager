@@ -147,11 +147,22 @@ const ScoreTable: React.FC<Props> = ({
     return [];
   }, [offences, selectedWeek, searchQuery, tab]);
 
-  const handleDelete = async (id: number) => {
-    if (!window.confirm('Bạn có chắc chắn muốn xóa?')) return;
-    const { error } = await supabase.rpc('delete_offence', { p_id: id, p_user: sessionId, p_role: role });
-    if (error) alert('Lỗi: ' + error.message);
-    else refreshData();
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    const { error } = await supabase.rpc('delete_offence', { p_id: deleteConfirmId, p_user: sessionId, p_role: role });
+    setIsDeleting(false);
+    if (error) {
+      setDeleteError('Lỗi: ' + error.message);
+    } else {
+      setDeleteConfirmId(null);
+      refreshData();
+    }
   };
 
   return (
@@ -166,23 +177,29 @@ const ScoreTable: React.FC<Props> = ({
       </header>
 
       <div style={styles.filterBar}>
-        <div style={{ width: '130px' }}>
+        <div style={{ flex: '1 1 130px', minWidth: '120px' }}>
           <Select
             options={weekOptions}
             value={weekOptions.find(w => w.value === selectedWeek) || null}
             onChange={opt => setSelectedWeek(opt?.value ?? null)}
             isClearable
             placeholder="📅 Tuần"
+            menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
+            menuPosition="fixed"
+            styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
           />
         </div>
         
         {tab === 'score' && (
-          <div style={{ width: '180px' }}>
+          <div style={{ flex: '1 1 160px', minWidth: '140px' }}>
             <Select
               options={sortOptions}
               value={sortOptions.find(o => o.value === sortBy)}
-              onChange={opt => setSortBy(opt?.value as any || 'point')}
+              onChange={opt => setSortBy(opt?.value === 'id' ? 'id' : 'point')}
               isSearchable={false}
+              menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
+              menuPosition="fixed"
+              styles={{ menuPortal: base => ({ ...base, zIndex: 9999 }) }}
             />
           </div>
         )}
@@ -250,7 +267,7 @@ const ScoreTable: React.FC<Props> = ({
                     <tr key={o.id} style={styles.tr}>
                       {isAdmin && (
                         <td style={styles.td}>
-                          <button onClick={() => handleDelete(o.id)} style={styles.deleteBtn}>🗑</button>
+                          <button onClick={() => { setDeleteError(null); setDeleteConfirmId(o.id); }} style={styles.deleteBtn} title="Xóa ghi nhận này">🗑</button>
                         </td>
                       )}
                       <td style={styles.td}>{o.student?.name}</td>
@@ -271,28 +288,129 @@ const ScoreTable: React.FC<Props> = ({
           </div>
         )}
       </div>
+      {/* DELETE CONFIRMATION MODAL */}
+      {deleteConfirmId !== null && (
+        <div style={modalStyles.overlay} onClick={() => setDeleteConfirmId(null)}>
+          <div style={modalStyles.content} onClick={e => e.stopPropagation()}>
+            <h3 style={modalStyles.title}>⚠️ Xác Nhận Xóa</h3>
+            <p style={modalStyles.text}>
+              Bạn có chắc chắn muốn xóa vi phạm / vi phạm điểm này? Hành động này không thể hoàn tác.
+            </p>
+            {deleteError && (
+              <div style={modalStyles.errorMsg}>{deleteError}</div>
+            )}
+            <div style={modalStyles.btnGroup}>
+              <button
+                onClick={() => setDeleteConfirmId(null)}
+                disabled={isDeleting}
+                style={modalStyles.cancelBtn}
+              >
+                Hủy bỏ
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={isDeleting}
+                style={modalStyles.confirmBtn}
+              >
+                {isDeleting ? 'Đang xóa...' : 'Xóa ngay'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { padding: '20px', maxWidth: '1200px', margin: '0 auto', fontFamily: 'system-ui, sans-serif' },
-  header: { marginBottom: '20px', textAlign: 'center' },
-  title: { fontSize: '1.4rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '15px' },
-  tabGroup: { display: 'flex', gap: '5px', background: '#f1f5f9', padding: '5px', borderRadius: '10px' },
-  tabActive: { flex: 1, padding: '10px', border: 'none', background: '#fff', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' },
-  tabInactive: { flex: 1, padding: '10px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' },
-  filterBar: { display: 'flex', gap: '10px', marginBottom: '15px', alignItems: 'center' },
-  searchInput: { flex: 1, padding: '10px 12px', borderRadius: '6px', border: '1px solid #ccc', outline: 'none', height: '38px', boxSizing: 'border-box' },
+  container: { padding: '16px 12px', maxWidth: '1200px', margin: '0 auto', fontFamily: "'Roboto', system-ui, sans-serif", boxSizing: 'border-box' },
+  header: { marginBottom: '16px', textAlign: 'center' },
+  title: { fontSize: '1.25rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '12px' },
+  tabGroup: { display: 'flex', gap: '4px', background: '#f1f5f9', padding: '4px', borderRadius: '12px', flexWrap: 'wrap' },
+  tabActive: { flex: '1 1 90px', padding: '8px 10px', border: 'none', background: '#fff', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)', color: '#2563eb' },
+  tabInactive: { flex: '1 1 90px', padding: '8px 10px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b', fontSize: '13px', fontWeight: '500' },
+  filterBar: { display: 'flex', gap: '10px', marginBottom: '15px', alignItems: 'center', flexWrap: 'wrap' },
+  searchInput: { flex: '2 1 160px', minWidth: '140px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', outline: 'none', height: '38px', boxSizing: 'border-box', fontSize: '14px', backgroundColor: '#f8fafc' },
   card: { background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' },
-  tableWrapper: { overflowX: 'auto' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: '14px' },
+  tableWrapper: { overflowX: 'auto', WebkitOverflowScrolling: 'touch' },
+  table: { width: '100%', borderCollapse: 'collapse', fontSize: '13px' },
   theadRow: { background: '#f8fafc' },
-  th: { padding: '12px', textAlign: 'left', color: '#475569', borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' },
+  th: { padding: '10px 12px', textAlign: 'left', color: '#475569', borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap', fontWeight: '700' },
   tr: { borderBottom: '1px solid #f1f5f9' },
-  td: { padding: '12px', color: '#334155', whiteSpace: 'nowrap' },
+  td: { padding: '10px 12px', color: '#334155', whiteSpace: 'nowrap' },
   deleteBtn: { color: '#ef4444', background: '#fee2e2', border: 'none', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer' },
-  loading: { padding: '50px', textAlign: 'center', color: '#64748b' }
+  loading: { padding: '40px 20px', textAlign: 'center', color: '#64748b', fontSize: '14px' }
+};
+
+const modalStyles: Record<string, React.CSSProperties> = {
+  overlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+    padding: '16px'
+  },
+  content: {
+    backgroundColor: '#ffffff',
+    borderRadius: '16px',
+    padding: '24px',
+    maxWidth: '420px',
+    width: '100%',
+    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+    boxSizing: 'border-box'
+  },
+  title: {
+    margin: '0 0 12px 0',
+    fontSize: '18px',
+    fontWeight: 700,
+    color: '#0f172a'
+  },
+  text: {
+    margin: '0 0 20px 0',
+    fontSize: '14px',
+    color: '#475569',
+    lineHeight: '1.5'
+  },
+  errorMsg: {
+    backgroundColor: '#fef2f2',
+    border: '1px solid #fecaca',
+    color: '#dc2626',
+    padding: '8px 12px',
+    borderRadius: '8px',
+    fontSize: '13px',
+    marginBottom: '16px'
+  },
+  btnGroup: {
+    display: 'flex',
+    gap: '12px',
+    justifyContent: 'flex-end'
+  },
+  cancelBtn: {
+    padding: '8px 16px',
+    borderRadius: '8px',
+    border: '1px solid #cbd5e1',
+    backgroundColor: '#ffffff',
+    color: '#334155',
+    fontWeight: 600,
+    fontSize: '14px',
+    cursor: 'pointer'
+  },
+  confirmBtn: {
+    padding: '8px 16px',
+    borderRadius: '8px',
+    border: 'none',
+    backgroundColor: '#dc2626',
+    color: '#ffffff',
+    fontWeight: 700,
+    fontSize: '14px',
+    cursor: 'pointer'
+  }
 };
 
 export default ScoreTable;

@@ -51,87 +51,92 @@ const MonthlyRankings: React.FC = () => {
     direction: 'asc',
   });
 
-  useEffect(() => {
-    fetchData();
-  }, [currentMonth]);
-
   /* =======================
       Fetch & Calculate (Giữ nguyên logic)
   ======================= */
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const [weeksRes, scoresRes, studentsRes] = await Promise.all([
-        supabase.from('week').select('*'),
-        supabase.from('weekly_score').select('*'),
-        supabase.from('student').select('id, name, class'),
-      ]);
+  useEffect(() => {
+    let ignore = false;
+    async function load() {
+      setLoading(true);
+      try {
+        const [weeksRes, scoresRes, studentsRes] = await Promise.all([
+          supabase.from('week').select('*'),
+          supabase.from('weekly_score').select('*'),
+          supabase.from('student').select('id, name, class'),
+        ]);
 
-      const weeks: Week[] = weeksRes.data ?? [];
-      const scores: WeeklyScore[] = scoresRes.data ?? [];
-      const students: Student[] = studentsRes.data ?? [];
+        if (ignore) return;
 
-      const months = Array.from(new Set(weeks.map(w => w.month))).sort((a, b) => a - b);
-      setAvailableMonths(months);
+        const weeks: Week[] = weeksRes.data ?? [];
+        const scores: WeeklyScore[] = scoresRes.data ?? [];
+        const students: Student[] = studentsRes.data ?? [];
 
-      if (currentMonth === null && months.length > 0) {
-        setCurrentMonth(months[months.length - 1]);
-        setLoading(false);
-        return;
-      }
-      if (currentMonth === null) {
-        setLoading(false);
-        return;
-      }
+        const months = Array.from(new Set(weeks.map(w => w.month))).sort((a, b) => a - b);
+        setAvailableMonths(months);
 
-      const weekToMonth: Record<number, number> = {};
-      weeks.forEach(w => { weekToMonth[w.week] = w.month; });
+        if (currentMonth === null && months.length > 0) {
+          setCurrentMonth(months[months.length - 1]);
+          setLoading(false);
+          return;
+        }
+        if (currentMonth === null) {
+          setLoading(false);
+          return;
+        }
 
-      const monthlyTotal: Record<number, Record<number, number>> = {};
-      scores.forEach(s => {
-        const month = weekToMonth[s.week];
-        if (!month) return;
-        if (!monthlyTotal[s.student_id]) monthlyTotal[s.student_id] = {};
-        monthlyTotal[s.student_id][month] = (monthlyTotal[s.student_id][month] || 0) + s.final_point;
-      });
+        const weekToMonth: Record<number, number> = {};
+        weeks.forEach(w => { weekToMonth[w.week] = w.month; });
 
-      const getRankings = (month: number): Record<number, number> => {
-        return [...students]
-          .map(stu => ({
-            id: stu.id,
-            total: monthlyTotal[stu.id]?.[month] ?? 0,
-          }))
-          .sort((a, b) => b.total - a.total)
-          .reduce<Record<number, number>>((acc, cur, idx) => {
-            acc[cur.id] = idx + 1;
-            return acc;
-          }, {});
-      };
+        const monthlyTotal: Record<number, Record<number, number>> = {};
+        scores.forEach(s => {
+          const month = weekToMonth[s.week];
+          if (!month) return;
+          if (!monthlyTotal[s.student_id]) monthlyTotal[s.student_id] = {};
+          monthlyTotal[s.student_id][month] = (monthlyTotal[s.student_id][month] || 0) + s.final_point;
+        });
 
-      const currentRanks = getRankings(currentMonth);
-      const prevRanks = months.includes(currentMonth - 1) ? getRankings(currentMonth - 1) : {};
-
-      const finalData: RankingRow[] = students.map(stu => {
-        const curPoint = monthlyTotal[stu.id]?.[currentMonth] ?? 0;
-        const curRank = currentRanks[stu.id] ?? 9999;
-        const prevRank = prevRanks[stu.id];
-        return {
-          id: stu.id,
-          name: stu.name,
-          class: stu.class,
-          current_point: curPoint,
-          current_rank: curRank,
-          rank_change: prevRank === undefined ? 0 : prevRank - curRank,
+        const getRankings = (month: number): Record<number, number> => {
+          return [...students]
+            .map(stu => ({
+              id: stu.id,
+              total: monthlyTotal[stu.id]?.[month] ?? 0,
+            }))
+            .sort((a, b) => b.total - a.total)
+            .reduce<Record<number, number>>((acc, cur, idx) => {
+              acc[cur.id] = idx + 1;
+              return acc;
+            }, {});
         };
-      });
 
-      setData(finalData);
-    } catch (err) {
-      console.error("Lỗi BXH tháng:", err);
-    } finally {
-      setLoading(false);
+        const currentRanks = getRankings(currentMonth);
+        const prevRanks = months.includes(currentMonth - 1) ? getRankings(currentMonth - 1) : {};
+
+        const finalData: RankingRow[] = students.map(stu => {
+          const curPoint = monthlyTotal[stu.id]?.[currentMonth] ?? 0;
+          const curRank = currentRanks[stu.id] ?? 9999;
+          const prevRank = prevRanks[stu.id];
+          return {
+            id: stu.id,
+            name: stu.name,
+            class: stu.class,
+            current_point: curPoint,
+            current_rank: curRank,
+            rank_change: prevRank === undefined ? 0 : prevRank - curRank,
+          };
+        });
+
+        setData(finalData);
+      } catch (err) {
+        console.error("Lỗi BXH tháng:", err);
+      } finally {
+        if (!ignore) setLoading(false);
+      }
     }
-  };
+    void load();
+    return () => {
+      ignore = true;
+    };
+  }, [currentMonth]);
 
   const sortedData = useMemo(() => {
     const items = [...data];
@@ -139,7 +144,7 @@ const MonthlyRankings: React.FC = () => {
     items.sort((a, b) => {
       const A = a[key];
       const B = b[key];
-      let cmp = (typeof A === 'string' && typeof B === 'string') ? A.localeCompare(B) : Number(A) - Number(B);
+      const cmp = (typeof A === 'string' && typeof B === 'string') ? A.localeCompare(B) : Number(A) - Number(B);
       return direction === 'asc' ? cmp : -cmp;
     });
     return items;
@@ -259,47 +264,50 @@ const renderRankChange = (change: number) => {
   );
 };
 
-const styles: any = {
+const styles: Record<string, React.CSSProperties> = {
   container: {
     background: '#ffffff',
-    padding: '32px',
-    borderRadius: '24px',
+    padding: '18px 14px',
+    borderRadius: '16px',
     boxShadow: '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
     border: '1px solid #f1f5f9',
+    boxSizing: 'border-box',
+    width: '100%'
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
-    marginBottom: '32px',
+    marginBottom: '20px',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: '16px'
+    gap: '12px'
   },
   iconContainer: {
     background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-    padding: '12px',
-    borderRadius: '16px',
+    padding: '10px',
+    borderRadius: '12px',
   },
   title: { 
     margin: 0, 
-    fontSize: '22px', 
+    fontSize: '18px', 
     fontWeight: 800, 
     color: '#1e293b',
     letterSpacing: '-0.01em'
   },
   subtitle: {
     color: '#64748b',
-    fontSize: '13px',
-    marginTop: '4px',
+    fontSize: '12px',
+    marginTop: '2px',
     display: 'flex',
     alignItems: 'center',
-    gap: '6px'
+    gap: '4px'
   },
   controlGroup: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '6px',
-    minWidth: '140px'
+    gap: '4px',
+    minWidth: '130px',
+    flex: '0 1 auto'
   },
   label: {
     fontSize: '11px',
@@ -309,36 +317,37 @@ const styles: any = {
     paddingLeft: '2px'
   },
   select: {
-    padding: '10px 14px',
-    borderRadius: '12px',
+    padding: '8px 12px',
+    borderRadius: '10px',
     border: '2px solid #f1f5f9',
     background: '#f8fafc',
     color: '#1e293b',
     fontWeight: 700,
-    fontSize: '14px',
+    fontSize: '13px',
     cursor: 'pointer',
     outline: 'none',
-    appearance: 'none', // Bỏ mũi tên mặc định của trình duyệt
+    appearance: 'none',
     backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%2364748b%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E")`,
     backgroundRepeat: 'no-repeat',
-    backgroundPosition: 'right 10px center',
-    backgroundSize: '16px',
-    paddingRight: '36px'
+    backgroundPosition: 'right 8px center',
+    backgroundSize: '14px',
+    paddingRight: '30px'
   },
-  tableWrapper: { overflowX: 'auto' },
+  tableWrapper: { overflowX: 'auto', WebkitOverflowScrolling: 'touch' },
   table: { width: '100%', borderCollapse: 'collapse' },
   th: {
-    padding: '12px 16px',
+    padding: '10px 12px',
     textAlign: 'left',
     color: '#64748b',
-    fontSize: '12px',
+    fontSize: '11px',
     fontWeight: 700,
     textTransform: 'uppercase',
     cursor: 'pointer',
     borderBottom: '2px solid #f8fafc',
+    whiteSpace: 'nowrap'
   },
-  thContent: { display: 'flex', alignItems: 'center', gap: '8px' },
-  td: { padding: '16px', background: '#fff', borderBottom: '1px solid #f8fafc' },
+  thContent: { display: 'flex', alignItems: 'center', gap: '6px' },
+  td: { padding: '12px 10px', background: '#fff', borderBottom: '1px solid #f8fafc', whiteSpace: 'nowrap' },
   tr: { transition: 'background-color 0.2s' },
   rankBadge: (r: number) => {
     let bg = '#f1f5f9';
@@ -348,26 +357,27 @@ const styles: any = {
     if (r === 3) { bg = '#fff7ed'; color = '#c2410c'; }
     return {
       display: 'inline-flex',
-      width: '34px', height: '34px',
+      width: '30px', height: '30px',
       justifyContent: 'center', alignItems: 'center',
-      borderRadius: '10px',
+      borderRadius: '8px',
       fontWeight: 800,
+      fontSize: '13px',
       background: bg,
       color: color,
       border: r <= 3 ? `1px solid ${color}30` : 'none',
     };
   },
   studentInfo: { display: 'flex', flexDirection: 'column' },
-  studentName: { fontWeight: 700, color: '#1e293b', fontSize: '15px' },
-  studentId: { fontSize: '12px', color: '#94a3b8', marginTop: '2px' },
-  pointText: { fontWeight: 800, color: '#2563eb', fontSize: '16px' },
+  studentName: { fontWeight: 700, color: '#1e293b', fontSize: '14px' },
+  studentId: { fontSize: '11px', color: '#94a3b8', marginTop: '2px' },
+  pointText: { fontWeight: 800, color: '#2563eb', fontSize: '15px' },
   badgeChange: {
-    display: 'inline-flex', alignItems: 'center', gap: '6px',
-    padding: '6px 12px', borderRadius: '12px', fontSize: '12px', fontWeight: 700,
+    display: 'inline-flex', alignItems: 'center', gap: '4px',
+    padding: '4px 8px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
   },
   loading: {
-    padding: '100px', display: 'flex', flexDirection: 'column',
-    alignItems: 'center', justifyContent: 'center'
+    padding: '60px 20px', display: 'flex', flexDirection: 'column',
+    alignItems: 'center', justifyContent: 'center', fontSize: '14px'
   },
 };
 

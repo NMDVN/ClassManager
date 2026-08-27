@@ -21,7 +21,6 @@ const AdminTools: React.FC<AdminToolsProps> = ({ onUpdate }) => {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   const handleRebuild = async () => {
-    if (!window.confirm(`Bạn có chắc muốn TÍNH TOÁN LẠI TOÀN BỘ điểm tuần ${targetWeek}?`)) return;
     setIsProcessing(true);
     setMessage(null);
     try {
@@ -29,15 +28,15 @@ const AdminTools: React.FC<AdminToolsProps> = ({ onUpdate }) => {
       if (error) throw error;
       setMessage({ type: 'success', text: `Đã cập nhật lại điểm tuần ${targetWeek}!` });
       onUpdate();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setMessage({ type: 'error', text: e.message || 'Lỗi xử lý' });
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleDeleteWeeklyScore = async () => {
-    if (!window.confirm(`CẢNH BÁO NGUY HIỂM: Xóa vĩnh viễn dữ liệu điểm tuần ${targetWeek}?`)) return;
     setIsProcessing(true);
     setMessage(null);
     try {
@@ -45,8 +44,9 @@ const AdminTools: React.FC<AdminToolsProps> = ({ onUpdate }) => {
       if (error) throw error;
       setMessage({ type: 'success', text: `Đã xóa sạch dữ liệu điểm tuần ${targetWeek}!` });
       onUpdate();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setMessage({ type: 'error', text: e.message || 'Lỗi xử lý' });
     } finally {
       setIsProcessing(false);
     }
@@ -123,7 +123,7 @@ const AdminTools: React.FC<AdminToolsProps> = ({ onUpdate }) => {
   );
 };
 
-const styles: any = {
+const styles: Record<string, React.CSSProperties> = {
   card: { 
     background: '#ffffff', 
     borderRadius: '20px', 
@@ -136,14 +136,14 @@ const styles: any = {
     display: 'flex', 
     alignItems: 'center', 
     justifyContent: 'space-between',
-    padding: '18px 24px',
+    padding: '14px 16px',
     cursor: 'pointer',
     userSelect: 'none',
     background: '#fff',
   },
   title: { 
     margin: 0, 
-    fontSize: '15px', 
+    fontSize: '14px', 
     fontWeight: '800', 
     color: '#1e293b',
     textTransform: 'uppercase', 
@@ -160,33 +160,33 @@ const styles: any = {
     transition: 'all 0.4s ease-in-out',
   },
   bodyInner: { 
-    padding: '0 24px 24px 24px', 
+    padding: '0 16px 16px 16px', 
     display: 'flex', 
     flexDirection: 'column', 
-    gap: '18px' 
+    gap: '14px' 
   },
-  inputGroup: { display: 'flex', alignItems: 'center', gap: '12px' },
+  inputGroup: { display: 'flex', alignItems: 'center', gap: '10px' },
   label: { fontSize: '13px', fontWeight: '700', color: '#64748b' },
   input: { 
-    width: '65px', 
-    padding: '10px', 
-    borderRadius: '12px', 
+    width: '60px', 
+    padding: '8px', 
+    borderRadius: '10px', 
     border: '2px solid #f1f5f9', 
     textAlign: 'center', 
     fontWeight: '800', 
-    fontSize: '15px',
+    fontSize: '14px',
     outline: 'none',
     color: '#4f46e5',
     background: '#f8fafc'
   },
-  actions: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' },
+  actions: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '10px' },
   btn: { 
     display: 'flex', 
     alignItems: 'center', 
     justifyContent: 'center', 
-    gap: '8px', 
-    padding: '14px', 
-    borderRadius: '14px', 
+    gap: '6px', 
+    padding: '12px', 
+    borderRadius: '12px', 
     border: 'none', 
     cursor: 'pointer', 
     fontWeight: '700', 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 
 interface Offence {
@@ -19,8 +19,7 @@ export default function AdminOffenceManager() {
 
   /* ================= FETCH ================= */
 
-  const fetchOffences = async () => {
-    setLoading(true);
+  const fetchOffences = useCallback(async () => {
     const { data, error } = await supabase
       .from("offence_catalog")
       .select("id, name, deducted_point, is_available")
@@ -33,10 +32,29 @@ export default function AdminOffenceManager() {
       setStatus({ type: "error", msg: error?.message || "Lỗi tải dữ liệu" });
     }
     setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
-    fetchOffences();
+    let ignore = false;
+    async function load() {
+      const { data, error } = await supabase
+        .from("offence_catalog")
+        .select("id, name, deducted_point, is_available")
+        .order("name");
+
+      if (ignore) return;
+      if (!error && data) {
+        setOffences(data);
+        setOriginal(data);
+      } else {
+        setStatus({ type: "error", msg: error?.message || "Lỗi tải dữ liệu" });
+      }
+      setLoading(false);
+    }
+    void load();
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   /* ================= LOCAL UPDATE ================= */
@@ -113,10 +131,10 @@ export default function AdminOffenceManager() {
   return (
     <div style={styles.tableContainer}>
       {/* HEADER */}
-      <div style={{ padding: "20px 24px", display: "flex", justifyContent: "space-between" }}>
+      <div style={{ padding: "16px", display: "flex", flexWrap: "wrap", gap: "12px", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <h3 style={{ margin: 0 }}>🚨 Quản lý lỗi / cộng điểm</h3>
-          <p style={{ margin: "6px 0 0", color: "#64748b", fontSize: "0.85rem" }}>
+          <h3 style={{ margin: 0, fontSize: "1.1rem" }}>🚨 Quản lý lỗi / cộng điểm</h3>
+          <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: "0.8rem" }}>
             Chỉ Super Admin mới có quyền chỉnh sửa
           </p>
         </div>
@@ -124,13 +142,14 @@ export default function AdminOffenceManager() {
         <button
           onClick={createNew}
           style={{
-            padding: "10px 16px",
+            padding: "8px 14px",
             borderRadius: "10px",
             border: "none",
             fontWeight: 600,
             background: "#16a34a",
             color: "#fff",
-            cursor: "pointer"
+            cursor: "pointer",
+            fontSize: "13px"
           }}
         >
           ➕ Thêm lỗi
@@ -141,10 +160,10 @@ export default function AdminOffenceManager() {
       {status && (
         <div
           style={{
-            margin: "0 24px 12px",
+            margin: "0 16px 12px",
             padding: "10px",
             borderRadius: "8px",
-            fontSize: "14px",
+            fontSize: "13px",
             background:
               status.type === "error" ? "#fef2f2" : "#f0fdf4",
             color:
@@ -159,95 +178,100 @@ export default function AdminOffenceManager() {
       )}
 
       {/* TABLE */}
-      <table width="100%" style={{ borderCollapse: "collapse", fontSize: "14px" }}>
-        <thead>
-          <tr style={{ color: "#64748b", textAlign: "left" }}>
-            <th style={{ padding: "12px 24px" }}>Tên lỗi</th>
-            <th style={{ padding: "12px" }}>Điểm</th>
-            <th style={{ padding: "12px" }}>Cho nhập</th>
-            <th style={{ padding: "12px 24px" }}></th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {offences.map(o => (
-            <tr
-              key={o.id}
-              style={{
-                borderTop: "1px solid #e2e8f0",
-                opacity: o.is_available ? 1 : 0.45
-              }}
-            >
-              <td style={{ padding: "12px 24px" }}>
-                <input
-                  value={o.name}
-                  onChange={e => updateLocal(o.id, "name", e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "8px 10px",
-                    borderRadius: "8px",
-                    border: "1px solid #cbd5e1"
-                  }}
-                />
-              </td>
-
-              <td style={{ padding: "12px" }}>
-                <input
-                  type="number"
-                  value={o.deducted_point}
-                  onChange={e =>
-                    updateLocal(o.id, "deducted_point", Number(e.target.value))
-                  }
-                  style={{
-                    width: "90px",
-                    padding: "8px",
-                    borderRadius: "8px",
-                    border: "1px solid #cbd5e1"
-                  }}
-                />
-              </td>
-
-              <td style={{ padding: "12px" }}>
-                <input
-                  type="checkbox"
-                  checked={o.is_available}
-                  onChange={e =>
-                    updateLocal(o.id, "is_available", e.target.checked)
-                  }
-                />
-              </td>
-
-              <td style={{ padding: "12px 24px" }}>
-                <button
-                  onClick={() => save(o)}
-                  disabled={savingId === o.id || !isChanged(o)}
-                  style={{
-                    padding: "8px 14px",
-                    borderRadius: "8px",
-                    border: "none",
-                    fontWeight: 600,
-                    cursor: isChanged(o) ? "pointer" : "not-allowed",
-                    background:
-                      savingId === o.id
-                        ? "#e2e8f0"
-                        : isChanged(o)
-                        ? "#2563eb"
-                        : "#cbd5e1",
-                    color: savingId === o.id ? "#64748b" : "#fff"
-                  }}
-                >
-                  {savingId === o.id ? "Đang lưu..." : "Lưu"}
-                </button>
-              </td>
+      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <table width="100%" style={{ borderCollapse: "collapse", fontSize: "13px", minWidth: "500px" }}>
+          <thead>
+            <tr style={{ color: "#64748b", textAlign: "left", background: "#f8fafc" }}>
+              <th style={{ padding: "10px 14px" }}>Tên lỗi</th>
+              <th style={{ padding: "10px", width: "90px" }}>Điểm</th>
+              <th style={{ padding: "10px", width: "80px" }}>Cho nhập</th>
+              <th style={{ padding: "10px 14px", width: "80px" }}></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+
+          <tbody>
+            {offences.map(o => (
+              <tr
+                key={o.id}
+                style={{
+                  borderTop: "1px solid #e2e8f0",
+                  opacity: o.is_available ? 1 : 0.45
+                }}
+              >
+                <td style={{ padding: "10px 14px" }}>
+                  <input
+                    value={o.name}
+                    onChange={e => updateLocal(o.id, "name", e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px"
+                    }}
+                  />
+                </td>
+
+                <td style={{ padding: "10px" }}>
+                  <input
+                    type="number"
+                    value={o.deducted_point}
+                    onChange={e =>
+                      updateLocal(o.id, "deducted_point", Number(e.target.value))
+                    }
+                    style={{
+                      width: "70px",
+                      padding: "8px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px"
+                    }}
+                  />
+                </td>
+
+                <td style={{ padding: "10px", textAlign: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={o.is_available}
+                    onChange={e =>
+                      updateLocal(o.id, "is_available", e.target.checked)
+                    }
+                  />
+                </td>
+
+                <td style={{ padding: "10px 14px" }}>
+                  <button
+                    onClick={() => save(o)}
+                    disabled={savingId === o.id || !isChanged(o)}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: "8px",
+                      border: "none",
+                      fontWeight: 600,
+                      fontSize: "12px",
+                      cursor: isChanged(o) ? "pointer" : "not-allowed",
+                      background:
+                        savingId === o.id
+                          ? "#e2e8f0"
+                          : isChanged(o)
+                          ? "#2563eb"
+                          : "#cbd5e1",
+                      color: savingId === o.id ? "#64748b" : "#fff"
+                    }}
+                  >
+                    {savingId === o.id ? "Đang lưu..." : "Lưu"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-const styles: any = {
+const styles: Record<string, React.CSSProperties> = {
   appLayout: {
     display: "flex",
     minHeight: "100vh",
