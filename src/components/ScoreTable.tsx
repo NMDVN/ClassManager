@@ -34,6 +34,8 @@ interface Props {
   refreshData: () => void;
 }
 
+const dayNameCache = new Map<string, string>();
+
 const ScoreTable: React.FC<Props> = ({
   scores,
   offences,
@@ -60,11 +62,13 @@ const ScoreTable: React.FC<Props> = ({
       ]);
 
       if (subRes.data) {
-        const subMap = subRes.data.reduce((acc, curr) => ({ ...acc, [curr.id]: curr.name }), {});
+        const subMap: Record<string, string> = {};
+        subRes.data.forEach(curr => { subMap[curr.id] = curr.name; });
         setSubjects(subMap);
       }
       if (sesRes.data) {
-        const sesMap = sesRes.data.reduce((acc, curr) => ({ ...acc, [curr.id]: curr.name }), {});
+        const sesMap: Record<string, string> = {};
+        sesRes.data.forEach(curr => { sesMap[curr.id] = curr.name; });
         setSessions(sesMap);
       }
     };
@@ -73,9 +77,14 @@ const ScoreTable: React.FC<Props> = ({
 
   const getDayOfWeek = useCallback((dateString: string) => {
     if (!dateString) return '—';
+    const cached = dayNameCache.get(dateString);
+    if (cached !== undefined) return cached;
+
     const date = new Date(dateString.replace(/-/g, '/'));
     const days = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
-    return isNaN(date.getTime()) ? '—' : days[date.getDay()];
+    const res = isNaN(date.getTime()) ? '—' : days[date.getDay()];
+    dayNameCache.set(dateString, res);
+    return res;
   }, []);
 
   const formatDelta = useCallback((val: number) => {

@@ -74,12 +74,12 @@ const MonthlyRankings: React.FC = () => {
         const months = Array.from(new Set(weeks.map(w => w.month))).sort((a, b) => a - b);
         setAvailableMonths(months);
 
-        if (currentMonth === null && months.length > 0) {
-          setCurrentMonth(months[months.length - 1]);
-          setLoading(false);
-          return;
+        const activeMonth = currentMonth ?? (months.length > 0 ? months[months.length - 1] : null);
+        if (currentMonth === null && activeMonth !== null) {
+          setCurrentMonth(activeMonth);
         }
-        if (currentMonth === null) {
+
+        if (activeMonth === null) {
           setLoading(false);
           return;
         }
@@ -96,23 +96,24 @@ const MonthlyRankings: React.FC = () => {
         });
 
         const getRankings = (month: number): Record<number, number> => {
-          return [...students]
-            .map(stu => ({
-              id: stu.id,
-              total: monthlyTotal[stu.id]?.[month] ?? 0,
-            }))
-            .sort((a, b) => b.total - a.total)
-            .reduce<Record<number, number>>((acc, cur, idx) => {
-              acc[cur.id] = idx + 1;
-              return acc;
-            }, {});
+          const list = new Array<{ id: number; total: number }>(students.length);
+          for (let i = 0; i < students.length; i++) {
+            const stu = students[i];
+            list[i] = { id: stu.id, total: monthlyTotal[stu.id]?.[month] ?? 0 };
+          }
+          list.sort((a, b) => b.total - a.total);
+          const ranks: Record<number, number> = {};
+          for (let i = 0; i < list.length; i++) {
+            ranks[list[i].id] = i + 1;
+          }
+          return ranks;
         };
 
-        const currentRanks = getRankings(currentMonth);
-        const prevRanks = months.includes(currentMonth - 1) ? getRankings(currentMonth - 1) : {};
+        const currentRanks = getRankings(activeMonth);
+        const prevRanks = months.includes(activeMonth - 1) ? getRankings(activeMonth - 1) : {};
 
         const finalData: RankingRow[] = students.map(stu => {
-          const curPoint = monthlyTotal[stu.id]?.[currentMonth] ?? 0;
+          const curPoint = monthlyTotal[stu.id]?.[activeMonth] ?? 0;
           const curRank = currentRanks[stu.id] ?? 9999;
           const prevRank = prevRanks[stu.id];
           return {

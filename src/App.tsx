@@ -163,36 +163,16 @@ function App() {
 
   useEffect(() => {
     let ignore = false;
-    async function load() {
-      setLoading(true);
-      try {
-        const [scoreRes, offenceRes] = await Promise.all([
-          supabase
-            .from("weekly_score")
-            .select(`*, student(name)`)
-            .order("final_point", { ascending: false }),
-
-          supabase
-            .from("offence_log")
-            .select(`*, student(name), offence:offence_catalog(name, deducted_point)`)
-            .order("day", { ascending: false })
-        ]);
-
-        if (!ignore) {
-          setScores(scoreRes.data || []);
-          setOffences(offenceRes.data || []);
-        }
-      } catch (e) {
-        console.error("Fetch Error:", e);
-      } finally {
-        if (!ignore) setLoading(false);
+    async function initData() {
+      if (!ignore) {
+        await fetchAllData();
       }
     }
-    void load();
+    void initData();
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [fetchAllData]);
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();

@@ -121,22 +121,38 @@ export function norm(s: string | null | undefined): string {
   return str.trim();
 }
 
+let v0Buf = new Int32Array(256);
+let v1Buf = new Int32Array(256);
+
 function levenshteinDistance(s1: string, s2: string): number {
   if (s1 === s2) return 0;
   if (s1.length === 0) return s2.length;
   if (s2.length === 0) return s1.length;
-  const v0 = new Int32Array(s2.length + 1);
-  const v1 = new Int32Array(s2.length + 1);
-  for (let i = 0; i <= s2.length; i++) v0[i] = i;
+
+  const len2 = s2.length;
+  if (v0Buf.length <= len2) {
+    const newSize = Math.max(v0Buf.length * 2, len2 + 1);
+    v0Buf = new Int32Array(newSize);
+    v1Buf = new Int32Array(newSize);
+  }
+
+  let v0 = v0Buf;
+  let v1 = v1Buf;
+
+  for (let i = 0; i <= len2; i++) v0[i] = i;
+
   for (let i = 0; i < s1.length; i++) {
     v1[0] = i + 1;
-    for (let j = 0; j < s2.length; j++) {
-      const cost = s1[i] === s2[j] ? 0 : 1;
+    const char1 = s1[i];
+    for (let j = 0; j < len2; j++) {
+      const cost = char1 === s2[j] ? 0 : 1;
       v1[j + 1] = Math.min(v1[j] + 1, v0[j + 1] + 1, v0[j] + cost);
     }
-    for (let j = 0; j <= s2.length; j++) v0[j] = v1[j];
+    const temp = v0;
+    v0 = v1;
+    v1 = temp;
   }
-  return v1[s2.length];
+  return v0[len2];
 }
 
 export function calcRatio(s1: string, s2: string): number {
@@ -194,7 +210,8 @@ export function buildIndex(data: ItemWithAlias[]) {
       choices[key] = row.id;
     }
   }
-  return { exact, choices };
+  const choiceKeys = Object.keys(choices);
+  return { exact, choices, choiceKeys };
 }
 
 export const studentIndex = buildIndex(STUDENTS);
@@ -207,7 +224,8 @@ export function match(
   exact: Record<string, number>,
   choices: Record<string, number>,
   threshold = 70,
-  useWRatio = true
+  useWRatio = true,
+  choiceKeysParam?: string[]
 ): { id: number | null; score: number } {
   if (!raw) return { id: null, score: 0 };
   const key = norm(raw);
@@ -217,13 +235,14 @@ export function match(
     return { id: exact[key], score: 100 };
   }
 
-  const choiceKeys = Object.keys(choices);
+  const choiceKeys = choiceKeysParam || Object.keys(choices);
   if (choiceKeys.length === 0) return { id: null, score: 0 };
 
   let bestMatch: string | null = null;
   let bestScore = -1;
 
-  for (const choice of choiceKeys) {
+  for (let i = 0; i < choiceKeys.length; i++) {
+    const choice = choiceKeys[i];
     const score = useWRatio ? calcWRatio(key, choice) : calcRatio(key, choice);
     if (score > bestScore) {
       bestScore = score;
@@ -307,10 +326,10 @@ export function processRawRecords(
   const offIndex = customOffences ? buildIndex(customOffences) : offenceIndex;
 
   const results: NormalizedRecordResult[] = records.map(r => {
-    const stMatch = match(r.s, stIndex.exact, stIndex.choices, 70, true);
-    const offMatch = match(r.o, offIndex.exact, offIndex.choices, 55, true);
-    const tMatch = match(r.t, timeIndex.exact, timeIndex.choices, 60, false);
-    const sMatch = match(r.b, sessionIndex.exact, sessionIndex.choices, 70, false);
+    const stMatch = match(r.s, stIndex.exact, stIndex.choices, 70, true, stIndex.choiceKeys);
+    const offMatch = match(r.o, offIndex.exact, offIndex.choices, 55, true, offIndex.choiceKeys);
+    const tMatch = match(r.t, timeIndex.exact, timeIndex.choices, 60, false, timeIndex.choiceKeys);
+    const sMatch = match(r.b, sessionIndex.exact, sessionIndex.choices, 70, false, sessionIndex.choiceKeys);
 
     return {
       student_id: stMatch.id,

@@ -14,6 +14,12 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { ImageImportModal } from './ImageImportModal';
+import {
+  getDayOfWeek,
+  getTimetableDay,
+  getTimetableSessionValue,
+  getTimetablePeriodValue
+} from '../utils/timetableHelpers';
 
 // --- Types ---
 interface StudentItem {
@@ -92,17 +98,8 @@ function getFilteredRows(
       if (!r.day) return false;
       if (dayFilter.startsWith('day_')) {
         const targetDayNum = parseInt(dayFilter.replace('day_', ''), 10);
-        const parts = r.day.split('-');
-        if (parts.length === 3) {
-          const y = parseInt(parts[0], 10);
-          const m = parseInt(parts[1], 10) - 1;
-          const d = parseInt(parts[2], 10);
-          if (isNaN(y) || isNaN(m) || isNaN(d)) return false;
-          const dt = new Date(y, m, d);
-          if (isNaN(dt.getTime()) || dt.getDay() !== targetDayNum) return false;
-        } else {
-          return false;
-        }
+        const jsDay = getDayOfWeek(r.day);
+        if (jsDay === null || jsDay !== targetDayNum) return false;
       } else if (r.day !== dayFilter) {
         return false;
       }
@@ -189,10 +186,9 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
     defaultsRef.current = defaults;
   }, [defaults]);
 
-  // --- Timetable & Value Cache Index References ---
-  const timetableMapRef = useRef<Map<string, string>>(new Map()); // Key: `${week}_${dayNum}_${sessionVal}_${periodVal}` -> subject_id string
-  const sessionValueMapRef = useRef<Map<string, number>>(new Map());
-  const periodValueMapRef = useRef<Map<string, number>>(new Map());
+  // --- Timetable Index Reference ---
+  // Key format: `${week}_${timetableDay}_${session}_${period}` -> subject_id (e.g. "1_2_1_3" -> "1")
+  const timetableIndexRef = useRef<Map<string, string>>(new Map());
 
   // --- Grid Rows State ---
   const [rows, setRows] = useState<GridRow[]>([]);
@@ -214,34 +210,29 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
     };
   }, [selectedWeek]);
 
-  // --- Synchronous O(1) Auto-infer Subject from pre-cached Timetable ---
-  const inferSubjectFromCache = useCallback((row: Partial<GridRow>): string | null => {
-    if (!row.week || !row.day || !row.session_id || !row.period_id) {
-      return null;
+  // --- Auto-infer Subject from Timetable (Single Shared Function) ---
+  const inferSubject = useCallback((row: {
+    week?: number | string;
+    day?: string;
+    session_id?: string | number;
+    period_id?: string | number;
+  }): string => {
+    const week = Number(row.week || selectedWeek || 1);
+    const day = row.day ? String(row.day) : '';
+    const timetableDay = getTimetableDay(day);
+    const session = getTimetableSessionValue(row.session_id);
+    const period = getTimetablePeriodValue(row.period_id);
+
+    let key = '';
+    let subjectId = '';
+
+    if (week && timetableDay && session && period) {
+      key = `${week}_${timetableDay}_${session}_${period}`;
+      subjectId = timetableIndexRef.current.get(key) || '';
     }
 
-    const parts = String(row.day).split('-');
-    if (parts.length !== 3) return null;
-    const year = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10) - 1;
-    const day = parseInt(parts[2], 10);
-    const date = new Date(year, month, day);
-    const jsDay = date.getDay();
-
-    let dayNum = 0;
-    if (jsDay >= 1 && jsDay <= 6) {
-      dayNum = jsDay + 1;
-    }
-    if (dayNum < 2 || dayNum > 7) return null;
-
-    const sessionVal = sessionValueMapRef.current.get(String(row.session_id)) ?? Number(row.session_id);
-    const periodVal = periodValueMapRef.current.get(String(row.period_id)) ?? Number(row.period_id);
-
-    if (!sessionVal || !periodVal) return null;
-
-    const key = `${row.week}_${dayNum}_${sessionVal}_${periodVal}`;
-    return timetableMapRef.current.get(key) || null;
-  }, []);
+    return subjectId;
+  }, [selectedWeek]);
 
   // --- Load Records for Specific Week ---
   const loadWeekRecords = useCallback(async (weekNum: number) => {
@@ -271,19 +262,39 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
           session_id?: number;
           day?: string;
           week?: number;
-        }) => ({
-          key: `db_${item.id}`,
-          id: item.id,
-          student_id: item.student_id ? String(item.student_id) : '',
-          offence_id: item.offence_id ? String(item.offence_id) : '',
-          sub_id: item.sub_id ? String(item.sub_id) : '',
-          period_id: item.period_id ? String(item.period_id) : '',
-          session_id: item.session_id ? String(item.session_id) : '',
-          day: item.day || new Date().toISOString().split('T')[0],
-          week: item.week || weekNum,
-          isNew: false,
-          isModified: false
-        }));
+        }) => {
+          const rowDay = item.day || new Date().toISOString().split('T')[0];
+          const rowWeek = item.week || weekNum;
+          const rowSession = item.session_id ? String(item.session_id) : '';
+          const rowPeriod = item.period_id ? String(item.period_id) : '';
+
+          let subId = (item.sub_id !== null && item.sub_id !== undefined && String(item.sub_id) !== '')
+            ? String(item.sub_id)
+            : '';
+
+          if (!subId && rowDay && rowSession && rowPeriod) {
+            subId = inferSubject({
+              day: rowDay,
+              week: rowWeek,
+              session_id: rowSession,
+              period_id: rowPeriod
+            });
+          }
+
+          return {
+            key: `db_${item.id}`,
+            id: item.id,
+            student_id: item.student_id ? String(item.student_id) : '',
+            offence_id: item.offence_id ? String(item.offence_id) : '',
+            sub_id: subId,
+            period_id: rowPeriod,
+            session_id: rowSession,
+            day: rowDay,
+            week: rowWeek,
+            isNew: false,
+            isModified: false
+          };
+        });
         setRows(mappedRows);
       } else {
         setRows([]);
@@ -294,7 +305,7 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
     } finally {
       setLoadingWeekData(false);
     }
-  }, []);
+  }, [inferSubject]);
 
   // --- Fetch Master Catalogs & Initialize ---
   const fetchAllData = useCallback(async () => {
@@ -306,12 +317,12 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
         supabase.from('period').select('id, name').order('id'),
         supabase.from('session').select('id, name').order('id'),
         supabase.from('subject').select('id, name').order('name'),
-        supabase.from('week').select('week').order('week'),
+        supabase.from('week').select('week, month').order('week'),
         supabase.from('timetable').select('*')
       ]);
 
-      if (st.error || ca.error || pe.error || se.error || su.error || we.error) {
-        throw new Error('Không thể tải danh mục dữ liệu hệ thống.');
+      if (tt.error) {
+        console.warn('Lưu ý: Không thể tải bảng timetable hoặc bảng chưa có dữ liệu:', tt.error);
       }
 
       const fetchedLists: ListsState = {
@@ -325,64 +336,31 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
 
       setLists(fetchedLists);
 
-      // Build session value lookup map
-      const sValMap = new Map<string, number>();
-      fetchedLists.session.forEach(s => {
-        const name = (s.name || '').toLowerCase();
-        let val = 0;
-        if (Number(s.id) === 1 || name.includes('sáng') || name.includes('sang') || name === '1') {
-          val = 1;
-        } else if (Number(s.id) === 2 || name.includes('chiều') || name.includes('chieu') || name === '2') {
-          val = 2;
-        } else if (!isNaN(Number(s.id))) {
-          val = Number(s.id);
-        }
-        sValMap.set(String(s.id), val);
-      });
-      sessionValueMapRef.current = sValMap;
-
-      // Build period value lookup map
-      const pValMap = new Map<string, number>();
-      fetchedLists.period.forEach(p => {
-        const match = String(p.name || '').match(/\d+/);
-        let val = 0;
-        if (match) {
-          val = parseInt(match[0], 10);
-        } else if (!isNaN(Number(p.id))) {
-          val = Number(p.id);
-        }
-        pValMap.set(String(p.id), val);
-      });
-      periodValueMapRef.current = pValMap;
-
-      // Build subject lookup index
-      const subById = new Map<string, string>();
-      const subByName = new Map<string, string>();
-      fetchedLists.subject.forEach(s => {
-        const sId = String(s.id);
-        subById.set(sId, sId);
-        subByName.set(s.name.trim().toLowerCase(), sId);
-      });
-
-      // Build Timetable lookup cache map
-      const ttMap = new Map<string, string>();
+      // Build single unified Timetable index: `${week}_${timetableDay}_${session}_${period}` -> subject_id
+      const ttIndex = new Map<string, string>();
       if (tt.data && tt.data.length > 0) {
-        tt.data.forEach((item: { week?: number; day?: number | string; session?: number | string; period?: number | string; subject_id?: number | string; subject_name?: string }) => {
+        tt.data.forEach((item: {
+          week?: number | string;
+          day?: number | string;
+          session?: number | string;
+          period?: number | string;
+          subject_id?: number | string;
+          sub_id?: number | string;
+        }) => {
           const w = Number(item.week);
-          const d = Number(item.day);
-          const s = Number(item.session);
-          const p = Number(item.period);
-          const rawSub = String(item.subject_id || item.subject_name || '').trim();
-          let matchedSubId = subById.get(rawSub);
-          if (!matchedSubId) {
-            matchedSubId = subByName.get(rawSub.toLowerCase());
-          }
-          if (matchedSubId && w && d && s && p) {
-            ttMap.set(`${w}_${d}_${s}_${p}`, matchedSubId);
+          const d = getTimetableDay(item.day);
+          const s = getTimetableSessionValue(item.session);
+          const p = getTimetablePeriodValue(item.period);
+          const rawSubId = item.subject_id !== null && item.subject_id !== undefined
+            ? String(item.subject_id).trim()
+            : (item.sub_id !== null && item.sub_id !== undefined ? String(item.sub_id).trim() : '');
+
+          if (w && d && s && p && rawSubId) {
+            ttIndex.set(`${w}_${d}_${s}_${p}`, rawSubId);
           }
         });
       }
-      timetableMapRef.current = ttMap;
+      timetableIndexRef.current = ttIndex;
 
       // Default week setup
       const initialWeek = fetchedLists.week.length > 0 ? fetchedLists.week[0].week : 1;
@@ -508,39 +486,31 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
     const newItems: GridRow[] = [];
     for (let i = 0; i < count; i++) {
       const row = createNewRow(undefined, d, selectedWeek);
-      if (row.week && row.day && row.session_id && row.period_id && !row.sub_id) {
-        const inferredSub = inferSubjectFromCache(row);
-        if (inferredSub) {
-          row.sub_id = inferredSub;
-        }
-      }
+      row.sub_id = inferSubject(row);
       newItems.push(row);
     }
 
     setRows(prev => [...newItems, ...prev]);
-  }, [createNewRow, inferSubjectFromCache, selectedWeek]);
+  }, [createNewRow, inferSubject, selectedWeek]);
 
   const handleUpdateRowCell = useCallback((key: string, field: keyof GridRow, value: string | number | boolean) => {
     setRows(prev => prev.map(r => {
       if (r.key !== key) return r;
 
-      const updated = {
+      const updated: GridRow = {
         ...r,
         [field]: value,
         isModified: !r.isNew
       };
 
-      // Auto-infer subject if any of the 4 key conditions updated
-      if (['week', 'day', 'session_id', 'period_id'].includes(field)) {
-        if (updated.week && updated.day && updated.session_id && updated.period_id) {
-          const inferredSub = inferSubjectFromCache(updated);
-          updated.sub_id = inferredSub || '';
-        }
+      // Auto-infer subject if any of the 4 key conditions updated (day, session_id, period_id, week)
+      if (field === 'day' || field === 'week' || field === 'session_id' || field === 'period_id') {
+        updated.sub_id = inferSubject(updated);
       }
 
       return updated;
     }));
-  }, [inferSubjectFromCache]);
+  }, [inferSubject]);
 
   const handleDuplicateRow = (rowToCopy: GridRow) => {
     const duplicated: GridRow = {
@@ -937,10 +907,10 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
 
       {/* ================= EXCEL GRID SPREADSHEET ================= */}
       <div style={tableWrapperStyle}>
-        <table style={tableStyle}>
+        <table style={{ ...tableStyle, minWidth: '1280px' }}>
           <thead>
             <tr>
-              <th style={{ ...thStyle, width: '38px', textAlign: 'center' }}>
+              <th style={{ ...thStyle, width: '38px', minWidth: '38px', textAlign: 'center' }}>
                 <input 
                   type="checkbox" 
                   checked={filteredRows.length > 0 && selectedKeys.length === filteredRows.length} 
@@ -948,20 +918,20 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
                   style={{ cursor: 'pointer' }}
                 />
               </th>
-              <th style={{ ...thStyle, width: '45px', textAlign: 'center' }}>STT</th>
-              <th style={{ ...thStyle, width: '80px', textAlign: 'center' }}>Trạng thái</th>
-              <th style={{ ...thStyle, minWidth: '220px' }}>
+              <th style={{ ...thStyle, width: '45px', minWidth: '45px', textAlign: 'center' }}>STT</th>
+              <th style={{ ...thStyle, width: '85px', minWidth: '85px', textAlign: 'center' }}>Trạng thái</th>
+              <th style={{ ...thStyle, minWidth: '200px' }}>
                 Học sinh <span style={{ color: '#ef4444' }}>*</span>
               </th>
-              <th style={{ ...thStyle, minWidth: '240px' }}>
+              <th style={{ ...thStyle, minWidth: '220px' }}>
                 Vi phạm / Điểm cộng <span style={{ color: '#ef4444' }}>*</span>
               </th>
               <th style={{ ...thStyle, minWidth: '130px' }}>Môn học</th>
-              <th style={{ ...thStyle, width: '90px' }}>Tiết</th>
-              <th style={{ ...thStyle, width: '95px' }}>Buổi</th>
-              <th style={{ ...thStyle, width: '135px' }}>Ngày</th>
-              <th style={{ ...thStyle, width: '80px' }}>Tuần</th>
-              <th style={{ ...thStyle, width: '75px', textAlign: 'center' }}>Thao tác</th>
+              <th style={{ ...thStyle, width: '115px', minWidth: '115px' }}>Tiết</th>
+              <th style={{ ...thStyle, width: '110px', minWidth: '110px' }}>Buổi</th>
+              <th style={{ ...thStyle, width: '150px', minWidth: '150px' }}>Ngày</th>
+              <th style={{ ...thStyle, width: '95px', minWidth: '95px' }}>Tuần</th>
+              <th style={{ ...thStyle, width: '80px', minWidth: '80px', textAlign: 'center' }}>Thao tác</th>
             </tr>
           </thead>
           <tbody>
@@ -1216,7 +1186,7 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
         onRecordsExtracted={(newRows) => {
           setRows(prev => [...newRows, ...prev]);
         }}
-        inferSubject={inferSubjectFromCache}
+        inferSubject={inferSubject}
         createNewRow={createNewRow}
       />
 
@@ -1344,20 +1314,22 @@ const presetInputMini: React.CSSProperties = {
   backgroundColor: '#ffffff',
   border: '1px solid #cbd5e1',
   borderRadius: '4px',
-  padding: '2px 6px',
-  fontSize: '12px',
+  padding: '3px 8px',
+  fontSize: '12.5px',
   outline: 'none',
-  color: '#334155'
+  color: '#334155',
+  minWidth: '130px'
 };
 
 const presetSelectMini: React.CSSProperties = {
   backgroundColor: '#ffffff',
   border: '1px solid #cbd5e1',
   borderRadius: '4px',
-  padding: '2px 6px',
-  fontSize: '12px',
+  padding: '3px 8px',
+  fontSize: '12.5px',
   outline: 'none',
-  color: '#334155'
+  color: '#334155',
+  minWidth: '85px'
 };
 
 const toolbarStyle: React.CSSProperties = {

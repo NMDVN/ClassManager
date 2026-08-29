@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import {
   CalendarDays,
@@ -61,24 +61,6 @@ const ROWS = [
   { session: "Chiều", period: 2, label: "Chiều - Tiết 2" },
   { session: "Chiều", period: 3, label: "Chiều - Tiết 3" },
   { session: "Chiều", period: 4, label: "Chiều - Tiết 4" }
-];
-
-// Fallback subjects if DB is unseeded
-const DEFAULT_SUBJECTS: Subject[] = [
-  { id: "1", name: "Toán" },
-  { id: "2", name: "Ngữ Văn" },
-  { id: "3", name: "Tiếng Anh" },
-  { id: "4", name: "Vật Lý" },
-  { id: "5", name: "Hóa Học" },
-  { id: "6", name: "Sinh Học" },
-  { id: "7", name: "Lịch Sử" },
-  { id: "8", name: "Địa Lý" },
-  { id: "9", name: "GDCD" },
-  { id: "10", name: "Tin Học" },
-  { id: "11", name: "Công Nghệ" },
-  { id: "12", name: "Thể Dục" },
-  { id: "13", name: "Quốc Phòng" },
-  { id: "14", name: "Chào Cờ / SHL" }
 ];
 
 export default function ScheduleManager() {
@@ -378,18 +360,17 @@ export default function ScheduleManager() {
     async function load() {
       try {
         const { data, error } = await supabase
-          .from("subject_catalog")
+          .from("subject")
           .select("id, name")
           .order("id", { ascending: true });
 
-        if (ignore) return;
-        if (!error && data && data.length > 0) {
+        if (!ignore && !error && data) {
           setSubjects(data);
-        } else {
-          setSubjects(DEFAULT_SUBJECTS);
+        } else if (!ignore) {
+          setSubjects([]);
         }
       } catch {
-        if (!ignore) setSubjects(DEFAULT_SUBJECTS);
+        if (!ignore) setSubjects([]);
       }
     }
     void load();
@@ -469,9 +450,42 @@ export default function ScheduleManager() {
     return false;
   };
 
+  const timetableMap = useMemo(() => {
+    const map = new Map<string, TimetableItem>();
+    for (let i = 0; i < timetable.length; i++) {
+      const item = timetable[i];
+      let dayKeyNum: number | null = null;
+      if (typeof item.day === "number") dayKeyNum = item.day;
+      else {
+        const parsed = parseInt(String(item.day).replace(/[^0-9]/g, ""), 10);
+        if (!isNaN(parsed)) dayKeyNum = parsed;
+        else if (String(item.day).includes("Hai")) dayKeyNum = 2;
+        else if (String(item.day).includes("Ba")) dayKeyNum = 3;
+        else if (String(item.day).includes("Tư")) dayKeyNum = 4;
+        else if (String(item.day).includes("Năm")) dayKeyNum = 5;
+        else if (String(item.day).includes("Sáu")) dayKeyNum = 6;
+      }
+
+      let sNorm = "";
+      if (item.session != null) {
+        const str = String(item.session).trim().toLowerCase();
+        if (str === "sáng" || str === "1" || str === "morning" || str === "sang") sNorm = "sáng";
+        else if (str === "chiều" || str === "2" || str === "afternoon" || str === "chieu") sNorm = "chiều";
+        else sNorm = str;
+      }
+
+      if (dayKeyNum !== null && sNorm) {
+        map.set(`${dayKeyNum}_${sNorm}_${Number(item.period)}`, item);
+      }
+    }
+    return map;
+  }, [timetable]);
+
   // Helper to find cell record in current timetable
-  const findCellRecord = (dayKey: number, session: string, period: number): TimetableItem | undefined => {
-    return timetable.find(
+  const findCellRecord = useCallback((dayKey: number, session: string, period: number): TimetableItem | undefined => {
+    const str = session.trim().toLowerCase();
+    const sNorm = (str === "sáng" || str === "1" || str === "morning" || str === "sang") ? "sáng" : (str === "chiều" || str === "2" || str === "afternoon" || str === "chieu") ? "chiều" : str;
+    return timetableMap.get(`${dayKey}_${sNorm}_${Number(period)}`) || timetable.find(
       item =>
         (Number(item.day) === dayKey ||
           item.day === `Thứ ${dayKey}` ||
@@ -479,7 +493,7 @@ export default function ScheduleManager() {
         isMatchingSession(item.session, session) &&
         Number(item.period) === Number(period)
     );
-  };
+  }, [timetableMap, timetable]);
 
   // 3. Handle Subject Change (UPDATE subject_id)
   const handleSubjectChange = async (
@@ -493,7 +507,8 @@ export default function ScheduleManager() {
     setNotification(null);
 
     const record = findCellRecord(dayKey, session, period);
-    const valToSave = newSubjectId === "" ? null : newSubjectId;
+    const sessionNum = (session === "Sáng" || String(session) === "1" || String(session).toLowerCase().includes("sáng") || String(session).toLowerCase().includes("sang")) ? 1 : 2;
+    const subIdVal = (newSubjectId === "" || newSubjectId === null || newSubjectId === undefined) ? null : Number(newSubjectId);
 
     // Optimistic UI update
     setTimetable(prev =>
@@ -503,7 +518,7 @@ export default function ScheduleManager() {
           isMatchingSession(item.session, session) &&
           Number(item.period) === Number(period)
         ) {
-          return { ...item, subject_id: valToSave };
+          return { ...item, subject_id: subIdVal };
         }
         return item;
       })
@@ -514,32 +529,34 @@ export default function ScheduleManager() {
         // Direct UPDATE on existing timetable record
         const { error } = await supabase
           .from("timetable")
-          .update({ subject_id: valToSave })
+          .update({ subject_id: subIdVal })
           .eq("id", record.id);
 
         if (error) throw error;
       } else {
-        // If query by week, day, session, period directly for UPDATE
-        const { error } = await supabase
-          .from("timetable")
-          .update({ subject_id: valToSave })
-          .eq("week", selectedWeek)
-          .eq("day", dayKey)
-          .eq("session", session)
-          .eq("period", period);
+        // Upsert by week, day, session, period
+        const { error } = await supabase.from("timetable").upsert(
+          {
+            week: selectedWeek,
+            day: dayKey,
+            session: sessionNum,
+            period: period,
+            subject_id: subIdVal
+          },
+          { onConflict: "week,day,session,period" }
+        );
 
         if (error) {
-          // If no row existed to update, perform upsert/insert gracefully
-          await supabase.from("timetable").upsert(
-            {
-              week: selectedWeek,
-              day: dayKey,
-              session: session,
-              period: period,
-              subject_id: valToSave
-            },
-            { onConflict: "week,day,session,period" }
-          );
+          // If upsert failed on conflict constraint, fallback to update
+          const { error: updateErr } = await supabase
+            .from("timetable")
+            .update({ subject_id: subIdVal })
+            .eq("week", selectedWeek)
+            .eq("day", dayKey)
+            .eq("session", sessionNum)
+            .eq("period", period);
+
+          if (updateErr) throw updateErr;
         }
       }
 
@@ -666,9 +683,10 @@ export default function ScheduleManager() {
 
         for (let i = 0; i < 9; i++) {
           const sessionStr = i < 5 ? "Sáng" : "Chiều";
+          const sessionNum = i < 5 ? 1 : 2;
           const periodNum = i < 5 ? i + 1 : i - 4;
           const rawVal = arr[i];
-          const subjectId = rawVal === 0 ? null : rawVal; // 0 -> NULL in DB, > 0 -> subject_id
+          const subjectId = (rawVal === 0 || rawVal === null || rawVal === undefined) ? null : Number(rawVal);
 
           const cellRecord = findCellRecord(dayNum, sessionStr, periodNum);
 
@@ -680,17 +698,17 @@ export default function ScheduleManager() {
                 .eq("id", cellRecord.id)
             );
           } else {
-            const dayToMatch = cellRecord?.day || dayNum;
-            const sessionToMatch = cellRecord?.session || sessionStr;
-
             updatePromises.push(
-              supabase
-                .from("timetable")
-                .update({ subject_id: subjectId })
-                .eq("week", selectedWeek)
-                .eq("day", dayToMatch)
-                .eq("session", sessionToMatch)
-                .eq("period", periodNum)
+              supabase.from("timetable").upsert(
+                {
+                  week: selectedWeek,
+                  day: dayNum,
+                  session: sessionNum,
+                  period: periodNum,
+                  subject_id: subjectId
+                },
+                { onConflict: "week,day,session,period" }
+              )
             );
           }
         }
