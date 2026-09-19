@@ -148,6 +148,10 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
 
   // --- Active Week & View Controls ---
   const [selectedWeek, setSelectedWeek] = useState<number>(1);
+  const selectedWeekRef = useRef(selectedWeek);
+  useEffect(() => {
+    selectedWeekRef.current = selectedWeek;
+  }, [selectedWeek]);
   const [dayFilter, setDayFilter] = useState<string>('all'); // 'all' or 'YYYY-MM-DD' or weekday number
 
   // --- Search & Selection ---
@@ -204,11 +208,11 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
       period_id: override?.period_id || d.period_id || '',
       session_id: override?.session_id || d.session_id || '',
       day: override?.day || d.day || new Date().toISOString().split('T')[0],
-      week: override?.week ?? weekOverride ?? selectedWeek,
+      week: override?.week ?? weekOverride ?? selectedWeekRef.current,
       isNew: true,
       isModified: false
     };
-  }, [selectedWeek]);
+  }, []);
 
   // --- Auto-infer Subject from Timetable (Single Shared Function) ---
   const inferSubject = useCallback((row: {
@@ -217,7 +221,7 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
     session_id?: string | number;
     period_id?: string | number;
   }): string => {
-    const week = Number(row.week || selectedWeek || 1);
+    const week = Number(row.week || selectedWeekRef.current || 1);
     const day = row.day ? String(row.day) : '';
     const timetableDay = getTimetableDay(day);
     const session = getTimetableSessionValue(row.session_id);
@@ -232,7 +236,7 @@ const RecordInputPage: React.FC<RecordInputPageProps> = ({ onUpdate }) => {
     }
 
     return subjectId;
-  }, [selectedWeek]);
+  }, []);
 
   // --- Load Records for Specific Week ---
   const loadWeekRecords = useCallback(async (weekNum: number) => {
